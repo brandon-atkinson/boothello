@@ -1,0 +1,13 @@
+#!/bin/sh
+#
+# This script will be executed *after* all the other init scripts.
+# You can put your own initialization stuff in here if you don't
+# want to do the full Sys V style init stuff.
+
+touch /var/lock/subsys/local
+
+export USERDATA_URL="http://169.254.169.254/latest/user-data"
+export USERDATA_SUPPLIED_PORT=$(curl -fs "$USERDATA_URL")
+export APP_JAR=/home/ec2-user/boothello-0.0.1-SNAPSHOT.jar
+export SERVER_PORT=${USERDATA_SUPPLIED_PORT:-8080}
+su ec2-user -c 'java -jar $APP_JAR > ${APP_JAR}.log'  
