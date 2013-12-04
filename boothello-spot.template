@@ -5,28 +5,18 @@
 
   "Parameters" : {
 
-    "VpcId" : {
-      "Type" : "String",
-      "Description" : "VpcId of your existing Virtual Private Cloud (VPC)",
-      "Default" : "vpc-7c0e061e"
-    },
-
-    "Subnets" : {
-      "Type" : "CommaDelimitedList",
-      "Description" : "The list of SubnetIds in your Virtual Private Cloud (VPC)",
-      "Default" : "subnet-afd8ecdb,subnet-42441204,subnet-995726b1"
-    },
-
-    "AZs" : {
-      "Type" : "CommaDelimitedList",
-      "Description" : "The list of AvailabilityZones for your Virtual Private Cloud (VPC)",
-      "Default" : "us-east-1b,us-east-1c,us-east-1d"
-    },
-
     "InstanceType" : {
       "Description" : "EC2 instance type",
       "Type" : "String",
       "Default" : "m1.small",
+      "AllowedValues" : [ "t1.micro","m1.small","m1.medium","m1.large","m1.xlarge","m2.xlarge","m2.2xlarge","m2.4xlarge","m3.xlarge","m3.2xlarge","c1.medium","c1.xlarge","cc1.4xlarge","cc2.8xlarge","cg1.4xlarge"],
+      "ConstraintDescription" : "must be a valid EC2 instance type."
+    },
+
+    "NATInstanceType" : {
+      "Description" : "NET Device EC2 instance type",
+      "Type" : "String",
+      "Default" : "t1.micro",
       "AllowedValues" : [ "t1.micro","m1.small","m1.medium","m1.large","m1.xlarge","m2.xlarge","m2.2xlarge","m2.4xlarge","m3.xlarge","m3.2xlarge","c1.medium","c1.xlarge","cc1.4xlarge","cc2.8xlarge","cg1.4xlarge"],
       "ConstraintDescription" : "must be a valid EC2 instance type."
     },
@@ -54,7 +44,7 @@
     "WebServerPort" : {
       "Description" : "TCP/IP port of the web server",
       "Type" : "String",
-      "Default" : "8888"
+      "Default" : "8080"
     }
   },
 
@@ -75,40 +65,132 @@
     },
 
     "AWSRegionArch2AMI" : {
-      "us-east-1"      : { "32" : "ami-aba768c2", "64" : "ami-fd5c7e94" },
-      "us-west-1"      : { "32" : "ami-458fd300", "64" : "ami-b18ed2f4" },
-      "us-west-2"      : { "32" : "ami-fcff72cc", "64" : "ami-feff72ce" },
-      "eu-west-1"      : { "32" : "ami-018bb975", "64" : "ami-998bb9ed" },
-      "sa-east-1"      : { "32" : "ami-a039e6bd", "64" : "ami-a239e6bf" },
-      "ap-southeast-1" : { "32" : "ami-425a2010", "64" : "ami-5e5a200c" },
-      "ap-southeast-2" : { "32" : "ami-f98512c3", "64" : "ami-43851279" },
-      "ap-northeast-1" : { "32" : "ami-7871c579", "64" : "ami-7671c577" }
+      "us-east-1" : { "64" : "ami-fd5c7e94" }
+    },
+
+    "AWSNATAMI" : {
+      "us-east-1"      : { "AMI" : "ami-c6699baf" }
+    },
+
+    "AWSRegion2AZs" : {
+        "us-east-1" : {"AZs" : ["us-east-1b","us-east-1c","us-east-1d"]}
+    },
+
+    "SubnetConfig" : {
+      "VPC"      : { "CIDR" : "10.0.0.0/16" },
+      "EastB"    : { "CIDR" : "10.0.1.0/24", "AZ" : "us-east-1b" },
+      "EastC"    : { "CIDR" : "10.0.2.0/24", "AZ" : "us-east-1c" },
+      "EastD"    : { "CIDR" : "10.0.3.0/24", "AZ" : "us-east-1d" }
     }
+
   },
 
   "Resources" : {
 
+   "VPC" : {
+      "Type" : "AWS::EC2::VPC",
+      "Properties" : {
+        "CidrBlock" : { "Fn::FindInMap" : [ "SubnetConfig", "VPC", "CIDR" ]},
+        "Tags" : [
+          { "Key" : "Application", "Value" : { "Ref" : "AWS::StackId" } }
+        ]
+      }
+    },
+
+    "InternetGateway" : {
+      "Type" : "AWS::EC2::InternetGateway",
+      "Properties" : {
+        "Tags" : [
+          { "Key" : "Application", "Value" : { "Ref" : "AWS::StackId" } }
+        ]
+      }
+    },
+
+    "GatewayToInternet" : {
+       "Type" : "AWS::EC2::VPCGatewayAttachment",
+       "Properties" : {
+         "VpcId" : { "Ref" : "VPC" },
+         "InternetGatewayId" : { "Ref" : "InternetGateway" }
+       }
+    },
+
+    "PublicRouteTable" : {
+      "Type" : "AWS::EC2::RouteTable",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VPC" },
+        "Tags" : [
+          { "Key" : "Application", "Value" : { "Ref" : "AWS::StackId" } }
+        ]
+      }
+    },
+
+    "PublicRoute" : {
+      "Type" : "AWS::EC2::Route",
+      "DependsOn" : "GatewayToInternet",
+      "Properties" : {
+        "RouteTableId" : { "Ref" : "PublicRouteTable" },
+        "DestinationCidrBlock" : "0.0.0.0/0",
+        "GatewayId" : { "Ref" : "InternetGateway" }
+      }
+    },
+
+    "EastBSubnet" : {
+      "Type" : "AWS::EC2::Subnet",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VPC" },
+        "AvailabilityZone" : { "Fn::FindInMap" : [ "SubnetConfig", "EastB", "AZ" ]},
+        "CidrBlock" : { "Fn::FindInMap" : [ "SubnetConfig", "EastB", "CIDR" ]},
+        "Tags" : [
+          { "Key" : "Application", "Value" : { "Ref" : "AWS::StackId" } }
+        ]
+      }
+    },
+
+    "EastCSubnet" : {
+      "Type" : "AWS::EC2::Subnet",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VPC" },
+        "AvailabilityZone" : { "Fn::FindInMap" : [ "SubnetConfig", "EastC", "AZ" ]},
+        "CidrBlock" : { "Fn::FindInMap" : [ "SubnetConfig", "EastC", "CIDR" ]},
+        "Tags" : [
+          { "Key" : "Application", "Value" : { "Ref" : "AWS::StackId" } }
+        ]
+      }
+    },
+
+    "EastDSubnet" : {
+      "Type" : "AWS::EC2::Subnet",
+      "Properties" : {
+        "VpcId" : { "Ref" : "VPC" },
+        "AvailabilityZone" : { "Fn::FindInMap" : [ "SubnetConfig", "EastD", "AZ" ]},
+        "CidrBlock" : { "Fn::FindInMap" : [ "SubnetConfig", "EastD", "CIDR" ]},
+        "Tags" : [
+          { "Key" : "Application", "Value" : { "Ref" : "AWS::StackId" } }
+        ]
+      }
+    },
+
     "OnDemandGroup" : {
       "Type" : "AWS::AutoScaling::AutoScalingGroup",
       "Properties" : {
-        "AvailabilityZones" : { "Ref" : "AZs" },
-        "VPCZoneIdentifier" : { "Ref" : "Subnets" },
+        "AvailabilityZones" : { "Fn::FindInMap" : ["AWSRegion2AZs", { "Ref" : "AWS::Region" }, "AZs"] },
+        "VPCZoneIdentifier" : [{ "Ref" : "EastBSubnet" }, { "Ref" : "EastCSubnet" }, { "Ref" : "EastDSubnet" }],
         "LaunchConfigurationName" : { "Ref" : "OnDemandLaunchConfig" },
         "MinSize" : "1",
         "MaxSize" : "3",
-        "LoadBalancerNames" : [ { "Ref" : "ElasticLoadBalancer" } ]
+        "LoadBalancerNames" : [ { "Ref" : "PublicLoadBalancer" } ]
       }
     },
 
     "SpotInstanceGroup" : {
       "Type" : "AWS::AutoScaling::AutoScalingGroup",
       "Properties" : {
-        "AvailabilityZones" : { "Ref" : "AZs" },
-        "VPCZoneIdentifier" : { "Ref" : "Subnets" },
+        "AvailabilityZones" : { "Fn::FindInMap" : ["AWSRegion2AZs", { "Ref" : "AWS::Region" }, "AZs"] },
+        "VPCZoneIdentifier" : [{ "Ref" : "EastBSubnet" }, { "Ref" : "EastCSubnet" }, { "Ref" : "EastDSubnet" }],
         "LaunchConfigurationName" : { "Ref" : "SpotInstanceLaunchConfig" },
         "MinSize" : "3",
         "MaxSize" : "3",
-        "LoadBalancerNames" : [ { "Ref" : "ElasticLoadBalancer" } ]
+        "LoadBalancerNames" : [ { "Ref" : "PublicLoadBalancer" } ]
       }
     },
 
@@ -203,11 +285,11 @@
       }
     },
 
-    "ElasticLoadBalancer" : {
+    "PublicLoadBalancer" : {
       "Type" : "AWS::ElasticLoadBalancing::LoadBalancer",
       "Properties" : {
-        "SecurityGroups" : [ { "Ref" : "LoadBalancerSecurityGroup" } ],
-        "Subnets" : { "Ref" : "Subnets" },
+        "SecurityGroups" : [ { "Ref" : "PublicLoadBalancerSecurityGroup" } ],
+        "Subnets" : [{ "Ref" : "EastBSubnet" }, { "Ref" : "EastCSubnet" }, { "Ref" : "EastDSubnet" }],
         "Listeners" : [ {
           "LoadBalancerPort" : "80",
           "InstancePort" : { "Ref" : "WebServerPort" },
@@ -223,11 +305,11 @@
       }
     },
 
-    "LoadBalancerSecurityGroup" : {
+    "PublicLoadBalancerSecurityGroup" : {
       "Type" : "AWS::EC2::SecurityGroup",
       "Properties" : {
         "GroupDescription" : "Enable HTTP access on port 80",
-        "VpcId" : { "Ref" : "VpcId" },
+        "VpcId" : { "Ref" : "VPC" },
         "SecurityGroupIngress" : [ { 
           "IpProtocol" : "tcp",
           "FromPort" : "80",
@@ -247,12 +329,12 @@
       "Type" : "AWS::EC2::SecurityGroup",
       "Properties" : {
         "GroupDescription" : "Enable HTTP access on the configured port",
-        "VpcId" : { "Ref" : "VpcId" },
+        "VpcId" : { "Ref" : "VPC" },
         "SecurityGroupIngress" : [ { 
           "IpProtocol" : "tcp",
           "FromPort" : { "Ref" : "WebServerPort" },
           "ToPort" : { "Ref" : "WebServerPort" },
-          "SourceSecurityGroupId" : { "Ref" : "LoadBalancerSecurityGroup" }
+          "SourceSecurityGroupId" : { "Ref" : "PublicLoadBalancerSecurityGroup" }
         }, 
         {
           "IpProtocol" : "tcp",
@@ -265,9 +347,9 @@
   },
 
   "Outputs" : {
-    "URL" : {
-      "Description" : "URL of the website",
-      "Value" :  { "Fn::Join" : [ "", [ "http://", { "Fn::GetAtt" : [ "ElasticLoadBalancer", "DNSName" ]}]]}
+    "PublicLoadBalancerURL" : {
+      "Description" : "URL of the public ELB",
+      "Value" :  { "Fn::Join" : [ "", [ "http://", { "Fn::GetAtt" : [ "PublicLoadBalancer", "DNSName" ]}]]}
     }
   }
 }
